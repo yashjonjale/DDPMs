@@ -77,4 +77,33 @@ def load_dataset(dataset_name):
     y = torch.from_numpy(y).to(torch.long)
     X = normalize_data(X)
     return X, y
+
+###### addoing code below 
+
+# import matplotlib.pyplot as plt
+
+# # Load a dataset (e.g., 'albatross')
+# X, _ = load_dataset('albatross')  # Ignore labels with '_'
+# print(X.shape)  # Check the shape of the data shape: [32561, 64]
+
+# # Load another dataset (e.g., 'moons')
+# X_moons, _ = load_dataset('moons')
+# print(X_moons.shape)  # Should be [8000, 2]
     
+# # Load the 'moons' dataset
+# X_moons, _ = load_dataset('moons')  # Shape: [8000, 2]
+# X_moons = X_moons.numpy()  # Convert to numpy for plotting
+
+# # Create a scatter plot
+# plt.figure(figsize=(8, 6))
+# plt.scatter(X_moons[:, 0], X_moons[:, 1], s=10, alpha=0.5, c='blue', label='Moons Dataset')
+# plt.title('Moons Dataset Visualization')
+# plt.xlabel('Dimension 1')
+# plt.ylabel('Dimension 2')
+# plt.legend()
+# plt.grid(True)
+
+# # Save the plot as a PNG
+# plt.savefig('moons_dataset.png', dpi=300, bbox_inches='tight')
+# plt.close()  # Close the figure to free memory
+# print("Saved visualization as 'moons_dataset.png'")
