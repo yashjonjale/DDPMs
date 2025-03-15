@@ -99,17 +99,18 @@ class DDPM(nn.Module):
         # Optional projection layers to refine the embedding
         self.time_proj = nn.Sequential(
             nn.Linear(self.embed_dim, self.embed_dim),
-            nn.SiLU(),
-            nn.Linear(self.embed_dim, self.embed_dim)
+            nn.ReLU()
         )
 
         # Noise prediction model (increased capacity)
         self.model = nn.Sequential(
-            nn.Linear(n_dim + self.embed_dim, 256),
+            nn.Linear(n_dim + self.embed_dim, 64),
+            nn.BatchNorm1d(64),
             nn.SiLU(),
-            nn.Linear(256, 256),
+            nn.Linear(64, 64),
+            nn.BatchNorm1d(64),
             nn.SiLU(),
-            nn.Linear(256, n_dim)
+            nn.Linear(64, n_dim)
         )
         
 
@@ -317,23 +318,30 @@ if __name__ == "__main__":
 
         # Load true data for evaluation
         data_X, _ = dataset.load_dataset(args.dataset)
+        print("step1")
         data_X = data_X.cpu()  # Move to CPU for evaluation
-
+        print("step2")
         # Convert samples and true data to required formats
         samples_np = samples.numpy()  # For get_emd
         data_X_np = data_X.numpy()   # For get_emd
         samples_torch = samples       # For get_nll (already torch tensor)
         data_X_torch = data_X         # For get_nll (already torch tensor)
-
+        print("step3")
         # Compute metrics
+        # emd = 0 # utils.get_emd(samples_np, data_X_np)
         emd = utils.get_emd(samples_np, data_X_np)
+        print("step4")
+        # nll = 0 # utils.get_nll(data_X_torch, samples_torch, temperature=1e-1)
         nll = utils.get_nll(data_X_torch, samples_torch, temperature=1e-1)
+        print("step4")
         print(f"EMD: {emd:.4f}, NLL: {nll:.4f}")
+        print("step6")
 
         # Save metrics
         with open(f'{run_name}/metrics.txt', 'w') as f:
             f.write(f"EMD: {emd:.4f}\nNLL: {nll:.4f}\n")
 
+        print("step7")
         # Visualize samples vs true data
         plt.scatter(samples_np[:, 0], samples_np[:, 1], s=5, alpha=0.5, label='Generated')
         plt.scatter(data_X_np[:args.n_samples, 0], data_X_np[:args.n_samples, 1], s=5, alpha=0.5, label='True')
@@ -345,3 +353,6 @@ if __name__ == "__main__":
 
     else:
         raise ValueError(f"Invalid mode {args.mode}")
+    
+# CUDA_VISIBLE_DEVICE=1 python ddpm.py --mode study --n_steps 200 --lbeta 0.0001 --ubeta 0.02 --dataset moons --n_dim 2 --n_samples 1000
+# CUDA_VISIBLE_DEVICE=1 python ddpm.py --mode train --n_steps 200 --lbeta 0.0001 --ubeta 0.02 --epochs 100 --batch_size 64 --lr 0.001 --dataset moons --n_dim 2
