@@ -31,6 +31,8 @@ CUDA_VISIBLE_DEVICE=-1 python ddpm.py --mode train --dataset moons
 This forces the script to run exclusively on the CPU.
 
 
+ CUDA_VISIBLE_DEVICE=1 python ddpm.py --mode study --n_steps 200 --lbeta 0.0001 --ubeta 0.02 --dataset moons --n_dim 2 --n_samples 1000
+ CUDA_VISIBLE_DEVICE=1 python ddpm.py --mode train --n_steps 200 --lbeta 0.0001 --ubeta 0.02 --epochs 100 --batch_size 64 --lr 0.001 --dataset moons --n_dim 2
 
 
 

@@ -12,19 +12,170 @@ import matplotlib.pyplot as plt
 import math
 
 
+class ResidualBlock(nn.Module):
+    """
+    A basic residual block with two fully connected layers and a skip connection.
+    """
+    def __init__(self, in_features, hidden_features=None):
+        super(ResidualBlock, self).__init__()
+        if hidden_features is None:
+            hidden_features = in_features
+
+        self.fc1 = nn.Linear(in_features, hidden_features)
+        self.fc2 = nn.Linear(hidden_features, in_features)
+        self.activation = nn.ReLU()
+
+    def forward(self, x):
+        # residual = x
+        out = self.activation(self.fc1(x))
+        out = self.fc2(out)
+        # out += residual  # Residual connection
+        # out = self.activation(out)
+        return out
+
+
+class ResUnet(nn.Module):
+    """
+    A simplified Residual MLP UNet for fixed-size vector data
+    """
+
+    def __init__(self, input_dim, dmodel=32, num_layers=3):
+        """
+        Args:
+            input_dim (int): The size of the input vector.
+            bottleneck_dim (int): The size of the bottleneck vector.
+            down_up_factor (int): The factor by which dimensions are divided when down-sampling
+                                  and multiplied when up-sampling.
+        """
+        super().__init__()
+
+        # 1) Generate down-sampling dimensions from input_dim -> bottleneck_dim
+        # self.down_dims = self._compute_dims(input_dim, bottleneck_dim, down_up_factor, custom_dims)
+
+        # 2) Generate up-sampling dimensions by reversing the down dims
+        #    e.g., if down_dims = [input_dim, ..., bottleneck_dim]
+        #    then up_dims = [bottleneck_dim, ..., input_dim]
+        # self.up_dims = list(reversed(self.down_dims))
+
+        # 3) Create down-sampling (encoder) layers and associated residual blocks
+        # self.down_layers = nn.ModuleList()
+        # self.down_resblocks = nn.ModuleList()
+        # for i in range(len(self.down_dims) - 1):
+        #     in_dim = self.down_dims[i]
+        #     out_dim = self.down_dims[i + 1]
+        #     self.down_layers.append(nn.Linear(in_dim, out_dim))
+        #     self.down_resblocks.append(ResidualBlock(out_dim))
+
+        # # 4) Create up-sampling (decoder) layers and associated residual blocks
+        # self.up_layers = nn.ModuleList()
+        # self.up_resblocks = nn.ModuleList()
+        # for i in range(len(self.up_dims) - 1):
+        #     in_dim = self.up_dims[i]
+        #     out_dim = self.up_dims[i + 1]
+        #     self.up_layers.append(nn.Linear(in_dim, out_dim))
+        #     self.up_resblocks.append(ResidualBlock(out_dim))
+
+        # For this implementation, we'll stack residual blocks without explicit down/up-sampling
+        # We'll keep the same dimensions across layers
+        self.hidden_dim = dmodel
+        
+        # Number of residual blocks to stack - can be adjusted as a hyperparameter
+        self.num_layers = num_layers  # Default value, can be passed as a parameter
+        
+        # Create a simple stack of residual blocks
+        self.blocks = nn.ModuleList()
+        
+        # First layer to project from input dimension to hidden dimension
+        self.input_proj = nn.Linear(input_dim, self.hidden_dim)
+        
+        # Stack of residual blocks with consistent dimension
+        for _ in range(self.num_layers):
+            self.blocks.append(ResidualBlock(self.hidden_dim))
+            
+        # Final projection back to input dimension
+        self.output_proj = nn.Linear(self.hidden_dim, input_dim)
+
+    def forward(self, x):
+        x = self.input_proj(x)
+        for block in self.blocks:
+            x = block(x)
+        x = self.output_proj(x)
+        return x
+
+
+    # def _compute_dims(self, start_dim, bottleneck_dim, factor, custom_dims=None):
+    #     """
+    #     Compute the list of dimensions from start_dim down to bottleneck_dim
+    #     by dividing by 'factor' at each step (rounding up), ensuring it does
+    #     not go below bottleneck_dim.
+    #     """
+    #     if custom_dims is not None:
+    #         return custom_dims
+    #     dims = [start_dim]
+    #     while dims[-1] > bottleneck_dim:
+    #         # Divide by factor and round up
+    #         next_dim = math.ceil(dims[-1] / factor)
+    #         if next_dim < bottleneck_dim:
+    #             next_dim = bottleneck_dim
+    #         dims.append(next_dim)
+    #     return dims
+
+    # def forward(self, x):
+    #     # ---------------------
+    #     # Down-sampling path
+    #     # ---------------------
+    #     temp = x
+    #     skip_connections = []
+    #     for linear_layer, resblock in zip(self.down_layers, self.down_resblocks):
+    #         x = F.relu(linear_layer(x))
+    #         x = resblock(x)
+    #         # Save each "down" output for skip connection
+    #         skip_connections.append(x)
+
+    #     # ---------------------
+    #     # Up-sampling path
+    #     # ---------------------
+    #     # Note: skip_connections is from smallest to largest in the forward pass,
+    #     # but we need them in reverse order for the up path.
+    #     skip_connections = skip_connections[::-1]
+
+    #     # We traverse up_layers normally, but each time we add the corresponding
+    #     # skip from the down path (with matching dimension).
+    #     for i, (linear_layer, resblock) in enumerate(zip(self.up_layers, self.up_resblocks)):
+    #         x = F.relu(linear_layer(x))
+    #         # Add skip connection (element-wise addition)
+    #         if i + 1< len(skip_connections):
+    #             x = x + skip_connections[i + 1]  # +1 to skip the bottleneck skip
+    #         else:
+    #             x = x + temp
+    #         x = resblock(x)
+
+    #     # The final output of x should match input_dim in size since
+    #     # self.up_dims[-1] is the original input dimension.
+    #     return x
+
+
+
 # SinusoidalPositionEmbeddings
 class SinusoidalPositionEmbeddings(nn.Module):
     def __init__(self, dim):
         super().__init__()
-        self.dim = dim # embedd dimention 128 ... 
+        if dim % 2 != 0:
+            raise ValueError("Embedding dimension must be even.")
+        self.dim = dim
+
 
     def forward(self, time): # input of shape (64)
         device = time.device
         half_dim = self.dim // 2
-        embeddings = math.log(10000) / (half_dim - 1)
-        embeddings = torch.exp(torch.arange(half_dim, device=device) * -embeddings)
-        embeddings = time[:, None] * embeddings[None, :]
-        embeddings = torch.cat((embeddings.sin(), embeddings.cos()), dim=-1)
+        # Compute the scaling factor for the frequencies (logarithmic spacing)
+        scale = math.log(10000) / (half_dim)
+        # Create frequency vector: shape [half_dim]
+        freqs = torch.exp(torch.arange(half_dim, device=device, dtype=torch.float32) * -scale)
+        # Compute the outer product: shape [batch, half_dim]
+        angles = time.unsqueeze(1).float() * freqs.unsqueeze(0)
+        # Return concatenated sine and cosine embeddings: shape [batch, dim]
+        embeddings = torch.cat([angles.sin(), angles.cos()], dim=-1)
         return embeddings
 
 
@@ -60,9 +211,10 @@ class NoiseScheduler():
 
         self.alphas = 1 - self.betas
         self.alphas_cumprod = torch.cumprod(self.alphas, dim=0)
-        self.alphas_cumprod_prev = torch.cat([torch.tensor([1.0] , dtype=torch.float32), self.alphas_cumprod[:-1]])
+        # self.alphas_cumprod_prev = torch.cat([torch.tensor([1.0] , dtype=torch.float32), self.alphas_cumprod[:-1]])
         self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)
         self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1 - self.alphas_cumprod)
+
 
     def add_noise(self, x, t, noise):
         # Index the scaling factors for each sample in the batch
@@ -79,7 +231,7 @@ class NoiseScheduler():
         return self.num_timesteps
     
 class DDPM(nn.Module):
-    def __init__(self, n_dim=3, n_steps=200):
+    def __init__(self, n_dim=3, n_steps=200, dm=128, num_layers=3):
         """
         Noise prediction network for the DDPM
 
@@ -92,26 +244,13 @@ class DDPM(nn.Module):
         super().__init__()
         self.n_dim = n_dim
         self.n_steps = n_steps
-        self.embed_dim = 128 # hyper parameter 
-
+        self.time_dim = 32 # hyper parameter
+        self.embed_dim = n_dim + self.time_dim
         # Sinusoidal embedding for timesteps
-        self.time_embed = SinusoidalPositionEmbeddings(dim=self.embed_dim)
-        # Optional projection layers to refine the embedding
-        self.time_proj = nn.Sequential(
-            nn.Linear(self.embed_dim, self.embed_dim),
-            nn.ReLU()
-        )
-
+        self.time_embed = SinusoidalPositionEmbeddings(dim=self.time_dim)
+        self.time_proj = nn.Linear(self.embed_dim, self.n_dim)
         # Noise prediction model (increased capacity)
-        self.model = nn.Sequential(
-            nn.Linear(n_dim + self.embed_dim, 64),
-            nn.BatchNorm1d(64),
-            nn.SiLU(),
-            nn.Linear(64, 64),
-            nn.BatchNorm1d(64),
-            nn.SiLU(),
-            nn.Linear(64, n_dim)
-        )
+        self.model = ResUnet(input_dim=n_dim, dmodel=dm, num_layers=num_layers)
         
 
     def forward(self, x, t): #  inputs is of shape (64,2) , (64)
@@ -124,10 +263,22 @@ class DDPM(nn.Module):
             torch.Tensor, the predicted noise tensor [batch_size, n_dim]
         """
         # Get sinusoidal embeddings for timesteps
-        time_embed = self.time_embed(t)  # [batch_size, embed_dim] # 64 * 128
-        time_embed = self.time_proj(time_embed)  # [batch_size, embed_dim] # 64 * 128
-        x_t = torch.cat([x, time_embed], dim=1)  # [batch_size, n_dim + embed_dim] # (64+2)*128
+        time_embed = self.time_embed(t)  # [batch_size, embed_dim] #
+        x_t = torch.cat([x, time_embed], dim=1)  # [batch_size, n_dim + n_dim] # (64+2)*128
+        x_t = self.time_proj(x_t) # [batch_size, n_dim] # 64*2
         return self.model(x_t) 
+
+
+
+
+
+
+
+
+
+
+
+
 
 class ConditionalDDPM():
     pass
@@ -166,7 +317,7 @@ def train(model, noise_scheduler, dataloader, optimizer, epochs, run_name):
         epoch_loss = 0.0
         num_batches = 0
         for batch in dataloader: # batch ( x , y )
-            x, y = batch # x.shape is 64*2 ... y is null
+            x = batch[0] # x.shape is 64*2 ... y is null
             t = torch.randint(0, noise_scheduler.num_timesteps, (x.shape[0],), device=x.device)
             # t.shape is 64 .. 
             noise = torch.randn_like(x)
@@ -271,27 +422,36 @@ if __name__ == "__main__":
     parser.add_argument("--mode", choices=['train', 'sample' , 'study'], default='sample')
     parser.add_argument("--n_steps", type=int, default=None) # this is T // number of diffusion steps 
     # we are supposed to check for T=10,50,100,150,200
-    parser.add_argument("--lbeta", type=float, default=None) # 0.0001
-    parser.add_argument("--ubeta", type=float, default=None) # 0.02
-    parser.add_argument("--epochs", type=int, default=None) # 100 epoch 
-    parser.add_argument("--n_samples", type=int, default=None) # number of samples we wanna generate .. say 1000
-    parser.add_argument("--batch_size", type=int, default=None) # 64 
+    parser.add_argument("--lbeta", type=float, default=0.0001) # 0.0001
+    parser.add_argument("--ubeta", type=float, default=0.02) # 0.02
+    parser.add_argument("--epochs", type=int, default=100) # 100 epoch 
+    parser.add_argument("--n_samples", type=int, default=1000) # number of samples we wanna generate .. say 1000
+    parser.add_argument("--batch_size", type=int, default=64) # 64 
     parser.add_argument("--lr", type=float, default=None) # 0.001 ... for now 
     parser.add_argument("--dataset", type=str, default = None) # do for moon first [8000 , 2]
     parser.add_argument("--seed", type=int, default = 42)
     parser.add_argument("--n_dim", type=int, default = None) # dimention of data .. # ( 2 for moon and 64 for albestros )
-
+    parser.add_argument("--dm", type=int, default = 16) # dimention of data .. # ( 2 for moon and 64 for albestros )
+    parser.add_argument("--num_layers", type=int, default = 3) # dimention of data .. # ( 2 for moon and 64 for albestros )
     # take the args from the command line
 
     args = parser.parse_args()
     utils.seed_everything(args.seed)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f"Device: {device}")
     run_name = f'exps/ddpm_{args.n_dim}_{args.n_steps}_{args.lbeta}_{args.ubeta}_{args.dataset}' # can include more hyperparams
     os.makedirs(run_name, exist_ok=True) # create a directory for plots and models 
 
-    model = DDPM(n_dim=args.n_dim, n_steps=args.n_steps) # 2 , 200
+    model = DDPM(n_dim=args.n_dim, n_steps=args.n_steps, dm=args.dm, num_layers=args.num_layers) # 2 , 200
     noise_scheduler = NoiseScheduler(num_timesteps=args.n_steps, beta_start=args.lbeta, beta_end=args.ubeta) # 200 , 0.0001 , 0.02
     model = model.to(device)
+
+    # noise_scheduler.betas = noise_scheduler.betas.to(device)
+    # noise_scheduler.alphas = noise_scheduler.alphas.to(device)
+    # noise_scheduler.alphas_cumprod = noise_scheduler.alphas_cumprod.to(device)
+    # noise_scheduler.alphas_cumprod_prev = noise_scheduler.alphas_cumprod_prev.to(device)
+    noise_scheduler.sqrt_alphas_cumprod = noise_scheduler.sqrt_alphas_cumprod.to(device)
+    noise_scheduler.sqrt_one_minus_alphas_cumprod = noise_scheduler.sqrt_one_minus_alphas_cumprod.to(device)
 
     if args.mode == 'train':
         epochs = args.epochs
@@ -299,8 +459,8 @@ if __name__ == "__main__":
         data_X, data_y = dataset.load_dataset(args.dataset)
         # can split the data into train and test -- for evaluation later
         data_X = data_X.to(device)
-        data_y = data_y.to(device)
-        dataloader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(data_X, data_y), batch_size=args.batch_size, shuffle=True)
+        
+        dataloader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(data_X), batch_size=args.batch_size, shuffle=True)
         train(model, noise_scheduler, dataloader, optimizer, epochs, run_name)
 
         torch.save(model.state_dict(), f'{run_name}/model.pth') # ADDED THIS LINE
@@ -328,8 +488,8 @@ if __name__ == "__main__":
         data_X_torch = data_X         # For get_nll (already torch tensor)
         print("step3")
         # Compute metrics
-        # emd = 0 # utils.get_emd(samples_np, data_X_np)
-        emd = utils.get_emd(samples_np, data_X_np)
+        emd = 0 # utils.get_emd(samples_np, data_X_np)
+        # emd = utils.get_emd(samples_np, data_X_np)
         print("step4")
         # nll = 0 # utils.get_nll(data_X_torch, samples_torch, temperature=1e-1)
         nll = utils.get_nll(data_X_torch, samples_torch, temperature=1e-1)
@@ -354,5 +514,3 @@ if __name__ == "__main__":
     else:
         raise ValueError(f"Invalid mode {args.mode}")
     
-# CUDA_VISIBLE_DEVICE=1 python ddpm.py --mode study --n_steps 200 --lbeta 0.0001 --ubeta 0.02 --dataset moons --n_dim 2 --n_samples 1000
-# CUDA_VISIBLE_DEVICE=1 python ddpm.py --mode train --n_steps 200 --lbeta 0.0001 --ubeta 0.02 --epochs 100 --batch_size 64 --lr 0.001 --dataset moons --n_dim 2
