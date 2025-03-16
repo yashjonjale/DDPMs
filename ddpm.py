@@ -211,7 +211,7 @@ class NoiseScheduler():
 
         self.alphas = 1 - self.betas
         self.alphas_cumprod = torch.cumprod(self.alphas, dim=0)
-        # self.alphas_cumprod_prev = torch.cat([torch.tensor([1.0] , dtype=torch.float32), self.alphas_cumprod[:-1]])
+        self.alphas_cumprod_prev = torch.cat([torch.tensor([1.0] , dtype=torch.float32), self.alphas_cumprod[:-1]])
         self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)
         self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1 - self.alphas_cumprod)
 
@@ -231,7 +231,7 @@ class NoiseScheduler():
         return self.num_timesteps
     
 class DDPM(nn.Module):
-    def __init__(self, n_dim=3, n_steps=200, dm=128, num_layers=3):
+    def __init__(self, n_dim=3, n_steps=200, dm=8, num_layers=3):
         """
         Noise prediction network for the DDPM
 
@@ -244,13 +244,38 @@ class DDPM(nn.Module):
         super().__init__()
         self.n_dim = n_dim
         self.n_steps = n_steps
-        self.time_dim = 32 # hyper parameter
+        self.time_dim = 128 # hyper parameter
         self.embed_dim = n_dim + self.time_dim
         # Sinusoidal embedding for timesteps
         self.time_embed = SinusoidalPositionEmbeddings(dim=self.time_dim)
-        self.time_proj = nn.Linear(self.embed_dim, self.n_dim)
+        self.time_proj = nn.Sequential(
+            nn.Linear(self.time_dim, self.time_dim),
+            nn.LeakyReLU(),
+            nn.Linear(self.time_dim, self.time_dim)
+        )
         # Noise prediction model (increased capacity)
-        self.model = ResUnet(input_dim=n_dim, dmodel=dm, num_layers=num_layers)
+        # self.model = ResUnet(input_dim=n_dim, dmodel=dm, num_layers=num_layers)
+        # self.model = nn.Sequential(
+        #     nn.BatchNorm1d(self.embed_dim),
+        #     nn.Linear(self.embed_dim, dm),
+        #     nn.BatchNorm1d(dm),
+        #     nn.LeakyReLU(),
+        #     nn.Linear(dm, dm),
+        #     nn.BatchNorm1d(dm),
+        #     nn.LeakyReLU(),
+        #     nn.Linear(dm, n_dim)
+        # )
+        self.model = nn.Sequential(
+            nn.Linear(self.embed_dim, dm),
+            nn.BatchNorm1d(dm),
+            nn.LeakyReLU(),
+            nn.Dropout(p=0.1),  # dropout layer with 10% drop probability
+            nn.Linear(dm, dm),
+            nn.BatchNorm1d(dm),
+            nn.LeakyReLU(),
+            nn.Dropout(p=0.1),  # another dropout layer
+            nn.Linear(dm, n_dim)
+        )
         
 
     def forward(self, x, t): #  inputs is of shape (64,2) , (64)
@@ -264,8 +289,8 @@ class DDPM(nn.Module):
         """
         # Get sinusoidal embeddings for timesteps
         time_embed = self.time_embed(t)  # [batch_size, embed_dim] #
+        time_embed = self.time_proj(time_embed) # [batch_size, time_dim] # 
         x_t = torch.cat([x, time_embed], dim=1)  # [batch_size, n_dim + n_dim] # (64+2)*128
-        x_t = self.time_proj(x_t) # [batch_size, n_dim] # 64*2
         return self.model(x_t) 
 
 
@@ -338,17 +363,32 @@ def train(model, noise_scheduler, dataloader, optimizer, epochs, run_name):
     plt.close()
 
 
+# def reverse_step(xt, eps, t, noise_scheduler):  # ( 1000*2 , 1000*2 , 1 )
+#     alpha_t = noise_scheduler.alphas[t] # alpha_t of shape 1
+#     alpha_cumprod_t = noise_scheduler.alphas_cumprod[t] # of shape 1
+#     beta_t = noise_scheduler.betas[t] # of shape 1
+    
+#     mu = (xt - (beta_t / torch.sqrt(1 - alpha_cumprod_t)) * eps) / torch.sqrt(alpha_t)
+#     if t > 0:
+#         z = torch.randn_like(xt)
+#     else:
+#         z = 0
+#     return mu + torch.sqrt(beta_t) * z
+
 def reverse_step(xt, eps, t, noise_scheduler):  # ( 1000*2 , 1000*2 , 1 )
     alpha_t = noise_scheduler.alphas[t] # alpha_t of shape 1
     alpha_cumprod_t = noise_scheduler.alphas_cumprod[t] # of shape 1
     beta_t = noise_scheduler.betas[t] # of shape 1
+    alpha_cumprod_prev_t = noise_scheduler.alphas_cumprod_prev[t]  # \bar{\alpha}_t
     
     mu = (xt - (beta_t / torch.sqrt(1 - alpha_cumprod_t)) * eps) / torch.sqrt(alpha_t)
     if t > 0:
+        sigma_t = torch.sqrt(((1 - alpha_cumprod_prev_t) / (1 - alpha_cumprod_t)) * beta_t)
         z = torch.randn_like(xt)
+        return mu + sigma_t * z
     else:
-        z = 0
-    return mu + torch.sqrt(beta_t) * z
+        return mu  # No noise at t=0
+
 
 @torch.no_grad()
 def sample(model, n_samples, noise_scheduler, return_intermediate=False): # n_smaples = 1000 in our case 
@@ -439,7 +479,7 @@ if __name__ == "__main__":
     utils.seed_everything(args.seed)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Device: {device}")
-    run_name = f'exps/ddpm_{args.n_dim}_{args.n_steps}_{args.lbeta}_{args.ubeta}_{args.dataset}' # can include more hyperparams
+    run_name = f'exps/ddpm_{args.n_dim}_{args.n_steps}_{args.lbeta}_{args.ubeta}_{args.dataset}_{args.dm}' # can include more hyperparams
     os.makedirs(run_name, exist_ok=True) # create a directory for plots and models 
 
     model = DDPM(n_dim=args.n_dim, n_steps=args.n_steps, dm=args.dm, num_layers=args.num_layers) # 2 , 200
@@ -449,7 +489,7 @@ if __name__ == "__main__":
     # noise_scheduler.betas = noise_scheduler.betas.to(device)
     # noise_scheduler.alphas = noise_scheduler.alphas.to(device)
     # noise_scheduler.alphas_cumprod = noise_scheduler.alphas_cumprod.to(device)
-    # noise_scheduler.alphas_cumprod_prev = noise_scheduler.alphas_cumprod_prev.to(device)
+    noise_scheduler.alphas_cumprod_prev = noise_scheduler.alphas_cumprod_prev.to(device)
     noise_scheduler.sqrt_alphas_cumprod = noise_scheduler.sqrt_alphas_cumprod.to(device)
     noise_scheduler.sqrt_one_minus_alphas_cumprod = noise_scheduler.sqrt_one_minus_alphas_cumprod.to(device)
 
